@@ -6,7 +6,8 @@
  *   feature/US-247  — a "small" change: OpportunityService logic, a new batch class without tests,
  *                     Modify All on Account, and a new agent action whose prompt template was forgotten
  *
- * Usage: node demo/create-demo-repo.mjs [target-dir]   (default: ./demo-repo)
+ * Usage: node demo/create-demo-repo.mjs [target-dir]              (default: ./demo-repo)
+ *        node demo/create-demo-repo.mjs --org <sfdx-project> [story]  (write into a real project)
  */
 import {execFileSync} from 'node:child_process'
 import fs from 'node:fs'
@@ -62,7 +63,7 @@ function salesManager({modifyAllAccounts}) {
     </fieldPermissions>
     <hasActivationRequired>false</hasActivationRequired>
     <label>Sales Manager</label>
-${objectPermission('Account', {edit: true, modifyAll: modifyAllAccounts, viewAll: modifyAllAccounts})}
+${objectPermission('Account', {del: modifyAllAccounts, edit: true, modifyAll: modifyAllAccounts, viewAll: modifyAllAccounts})}
 ${objectPermission('Opportunity', {create: true, edit: true})}
 </PermissionSet>
 `
@@ -189,6 +190,14 @@ private class OpportunityServiceTest {
         OpportunityService.applyStageDefaults(new List<Opportunity>{ opp });
         System.assertEquals(100, opp.Probability);
     }
+
+    @IsTest
+    static void openPipelineIncludesOpenOpportunities() {
+        Account acc = new Account(Name = 'Acme');
+        insert acc;
+        insert new Opportunity(Name = 'Open', AccountId = acc.Id, StageName = 'Prospecting', CloseDate = Date.today(), Amount = 1000);
+        System.assertNotEquals(null, OpportunityService.openPipeline(acc.Id));
+    }
 }
 `,
   ),
@@ -209,13 +218,32 @@ private class OpportunityServiceTest {
   ...apexClass(
     'OpportunityRollupAction',
     `public with sharing class OpportunityRollupAction {
+    public class Request {
+        @InvocableVariable(required=true) public Id accountId;
+    }
+
     @InvocableMethod(label='Roll up open pipeline')
-    public static List<Decimal> rollup(List<Id> accountIds) {
+    public static List<Decimal> rollup(List<Request> requests) {
         List<Decimal> totals = new List<Decimal>();
-        for (Id accountId : accountIds) {
-            totals.add(OpportunityService.openPipeline(accountId));
+        for (Request request : requests) {
+            totals.add(OpportunityService.openPipeline(request.accountId));
         }
         return totals;
+    }
+}
+`,
+  ),
+  ...apexClass(
+    'OpportunityRollupActionTest',
+    `@IsTest
+private class OpportunityRollupActionTest {
+    @IsTest
+    static void rollsUpPerAccount() {
+        Account acc = new Account(Name = 'Acme');
+        insert acc;
+        OpportunityRollupAction.Request request = new OpportunityRollupAction.Request();
+        request.accountId = acc.Id;
+        System.assertEquals(1, OpportunityRollupAction.rollup(new List<OpportunityRollupAction.Request>{ request }).size());
     }
 }
 `,
@@ -269,15 +297,38 @@ private class AccountIntelligenceControllerTest {
     <actionCalls>
         <name>Roll_up_pipeline</name>
         <label>Roll up pipeline</label>
-        <actionName>OpportunityRollupAction</actionName>
-        <actionType>apex</actionType>
         <locationX>176</locationX>
         <locationY>134</locationY>
+        <actionName>OpportunityRollupAction</actionName>
+        <actionType>apex</actionType>
+        <flowTransactionModel>CurrentTransaction</flowTransactionModel>
+        <inputParameters>
+            <name>accountId</name>
+            <value>
+                <elementReference>recordId</elementReference>
+            </value>
+        </inputParameters>
     </actionCalls>
     <apiVersion>${API}</apiVersion>
+    <environments>Default</environments>
+    <interviewLabel>Account Pipeline Update {!$Flow.CurrentDateTime}</interviewLabel>
     <label>Account Pipeline Update</label>
     <processType>AutoLaunchedFlow</processType>
+    <start>
+        <locationX>50</locationX>
+        <locationY>0</locationY>
+        <connector>
+            <targetReference>Roll_up_pipeline</targetReference>
+        </connector>
+    </start>
     <status>Active</status>
+    <variables>
+        <name>recordId</name>
+        <dataType>String</dataType>
+        <isCollection>false</isCollection>
+        <isInput>true</isInput>
+        <isOutput>false</isOutput>
+    </variables>
 </Flow>
 `,
 
@@ -322,7 +373,8 @@ export default class AccountInsights extends LightningElement {
   [`${base}/permissionsets/Sales_Manager.permissionset-meta.xml`]: salesManager({modifyAllAccounts: false}),
 }
 
-const featureFiles = {
+/** Story changes that deploy to any Salesforce org. */
+const storyFiles = {
   ...apexClass('OpportunityService', opportunityServiceV2),
   ...apexClass(
     'OpportunityScoringBatch',
@@ -343,6 +395,32 @@ const featureFiles = {
 `,
   ),
   [`${base}/permissionsets/Sales_Manager.permissionset-meta.xml`]: salesManager({modifyAllAccounts: true}),
+}
+
+/** What the developer commits after reading AgentGuard's findings: a test for the batch, and no Modify All. */
+const fixFiles = {
+  ...apexClass(
+    'OpportunityScoringBatchTest',
+    `@IsTest
+private class OpportunityScoringBatchTest {
+    @IsTest
+    static void defaultsMissingProbability() {
+        Account acc = new Account(Name = 'Acme');
+        insert acc;
+        insert new Opportunity(Name = 'Open', AccountId = acc.Id, StageName = 'Prospecting', CloseDate = Date.today());
+        Test.startTest();
+        Database.executeBatch(new OpportunityScoringBatch());
+        Test.stopTest();
+        System.assertEquals(1, [SELECT COUNT() FROM Opportunity WHERE Probability != null]);
+    }
+}
+`,
+  ),
+  [`${base}/permissionsets/Sales_Manager.permissionset-meta.xml`]: salesManager({modifyAllAccounts: false}),
+}
+
+/** Story changes that need an Agentforce-enabled org. */
+const agentforceStoryFiles = {
   [`${base}/genAiFunctions/GetOpportunityInsights/GetOpportunityInsights.genAiFunction-meta.xml`]: genAiFunction({
     description: 'Explain which open opportunities on the account are at risk.',
     label: 'Get Opportunity Insights',
@@ -378,13 +456,46 @@ export function createDemoRepo(target) {
   git(root, 'commit', '-q', '-m', 'Sales Assistant agent')
 
   git(root, 'checkout', '-q', '-b', 'feature/US-247')
-  write(root, featureFiles)
+  write(root, {...storyFiles, ...agentforceStoryFiles})
   git(root, 'add', '-A')
   git(root, 'commit', '-q', '-m', 'US-247: weighted pipeline, opportunity scoring and insights action')
   return root
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  const root = createDemoRepo(process.argv[2] ?? 'demo-repo')
-  console.log(`Demo repository created at ${root} on branch feature/US-247.\n\nTry:\n  cd ${root}\n  agentia guard analyze --base main --target UAT`)
+/** Metadata folders that only deploy to an Agentforce-enabled org. */
+const AGENTFORCE_FOLDERS = ['bots', 'genAiFunctions', 'genAiPlannerBundles', 'genAiPlugins', 'genAiPromptTemplates']
+
+/**
+ * Writes the demo into an existing Salesforce DX project for a real Copado pipeline:
+ * the baseline into force-app, and the story change into agentguard-demo/<story>/ to apply after `work set`.
+ */
+export function exportToProject(target, story = 'US-0000025') {
+  const root = path.resolve(target)
+  if (!fs.existsSync(path.join(root, 'sfdx-project.json'))) throw new Error(`Not a Salesforce DX project: ${root}`)
+  const baseline = Object.fromEntries(Object.entries(mainFiles).filter(([file]) => file.startsWith('force-app/')))
+  write(root, baseline)
+  write(path.join(root, 'agentguard-demo', story), storyFiles)
+  write(path.join(root, 'agentguard-demo', `${story}-fix`), fixFiles)
+  write(path.join(root, 'agentguard-demo'), {
+    'forceignore-agentforce.txt': [
+      '',
+      '# AgentGuard demo: Agentforce is not enabled in these sandboxes, so agent metadata stays in Git',
+      '# (where AgentGuard analyses it) but is never deployed. Remove these lines in an Agentforce-enabled org.',
+      ...AGENTFORCE_FOLDERS.map((folder) => `**/${folder}/**`),
+      '',
+    ].join('\n'),
+  })
+  return {baseline: Object.keys(baseline).length, root, story: Object.keys(storyFiles).length}
 }
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  if (process.argv[2] === '--org') {
+    const {baseline, root, story} = exportToProject(process.argv[3] ?? '.', process.argv[4])
+    console.log(`Wrote ${baseline} baseline files to ${root}/force-app and ${story} story files to ${root}/agentguard-demo/.`)
+  } else {
+    const root = createDemoRepo(process.argv[2] ?? 'demo-repo')
+    console.log(`Demo repository created at ${root} on branch feature/US-247.\n\nTry:\n  cd ${root}\n  agentia guard analyze --base main --target UAT`)
+  }
+}
+
+export {API, XMLNS, apexClass, base, mainFiles as salesAssistantFiles, write}

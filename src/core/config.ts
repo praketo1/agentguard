@@ -19,10 +19,16 @@ export interface AgentGuardConfig {
       fieldEdit: number
       sensitiveUserPermission: number
       sensitiveUserPermissions: string[]
+      sharingRemoved: number
+      withoutSharingEntryPoint: number
     }
     dependency: {
       missingDependency: number
       deletedButReferenced: number
+      breakingFieldChange: number
+      picklistValueRemoved: number
+      dataRuleOnAutomatedObject: number
+      automationOverlap: number
       highBlastRadius: number
       blastRadius: number
       sharedService: number
@@ -36,6 +42,7 @@ export interface AgentGuardConfig {
       testModified: number
       testsNotUpdated: number
       flowWithoutTest: number
+      seeAllData: number
     }
     agentforce: {
       agentAffected: number
@@ -77,10 +84,16 @@ export const DEFAULT_CONFIG: AgentGuardConfig = {
         'ResetPasswords',
         'ViewSetup',
       ],
+      sharingRemoved: 12,
+      withoutSharingEntryPoint: 8,
     },
     dependency: {
       missingDependency: 15,
       deletedButReferenced: 15,
+      breakingFieldChange: 12,
+      picklistValueRemoved: 6,
+      dataRuleOnAutomatedObject: 8,
+      automationOverlap: 6,
       highBlastRadius: 10,
       blastRadius: 3,
       sharedService: 7,
@@ -94,6 +107,7 @@ export const DEFAULT_CONFIG: AgentGuardConfig = {
       testModified: 4,
       testsNotUpdated: 3,
       flowWithoutTest: 3,
+      seeAllData: 5,
     },
     agentforce: {
       agentAffected: 10,

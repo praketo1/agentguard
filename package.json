@@ -79,6 +79,7 @@
     "prepack": "npm run build && oclif manifest",
     "postpack": "npm run clean",
     "test": "vitest run",
-    "demo": "node demo/create-demo-repo.mjs"
+    "demo": "node demo/create-demo-repo.mjs",
+    "demo:o2c": "node demo/order-to-cash.mjs"
   }
 }

@@ -41,11 +41,11 @@ describe('demo scenario: feature/US-247', () => {
 
   it('scores the change HIGH and blocks promotion', async () => {
     const report = await analyze()
-    expect(report.risk).toMatchObject({level: 'HIGH', promotable: false, score: 80})
+    expect(report.risk).toMatchObject({level: 'HIGH', promotable: false, score: 70})
     expect(report.risk.categories).toEqual({
       agentforce: {max: 20, score: 20},
       dependency: {max: 30, score: 17},
-      security: {max: 30, score: 25},
+      security: {max: 30, score: 15},
       test: {max: 20, score: 18},
     })
   })
@@ -91,7 +91,7 @@ describe('remediation', () => {
   it('lowers the score after fixing the findings', async () => {
     const before = await analyze()
     const permset = 'force-app/main/default/permissionsets/Sales_Manager.permissionset-meta.xml'
-    write(permset, read(permset).replaceAll('<modifyAllRecords>true', '<modifyAllRecords>false').replaceAll('<viewAllRecords>true', '<viewAllRecords>false'))
+    write(permset, read(permset).replaceAll('<modifyAllRecords>true', '<modifyAllRecords>false').replaceAll('<viewAllRecords>true', '<viewAllRecords>false').replaceAll('<allowDelete>true', '<allowDelete>false'))
     write(`${CLASSES}/OpportunityScoringBatchTest.cls`, '@IsTest\nprivate class OpportunityScoringBatchTest {\n    @IsTest static void runs() { Database.executeBatch(new OpportunityScoringBatch()); System.assert(true); }\n}\n')
     write(
       'force-app/main/default/genAiPromptTemplates/OpportunityInsightsPrompt.genAiPromptTemplate-meta.xml',
@@ -121,7 +121,7 @@ describe('other rules', () => {
     const test = `${CLASSES}/OpportunityServiceTest.cls`
     write(test, read(test).replace(/\s*System\.assertEquals\(100, opp\.Probability\);/, ''))
     const report = await analyze()
-    expect(report.findings.find((finding) => finding.title === 'Test assertions removed')?.evidence).toEqual(['Assertions: 1 → 0'])
+    expect(report.findings.find((finding) => finding.title === 'Test assertions removed')?.evidence).toEqual(['Assertions: 2 → 1'])
   })
 
   it('reports LOW with no findings when nothing changed', async () => {
@@ -129,5 +129,18 @@ describe('other rules', () => {
     const report = await analyze()
     expect(report.changes.total).toBe(0)
     expect(report.risk).toMatchObject({level: 'LOW', promotable: true, score: 0})
+  })
+})
+
+describe('modify all', () => {
+  it('folds the required View All and Delete grants into one finding', async () => {
+    const report = await analyze()
+    const security = report.findings.filter((finding) => finding.category === 'security')
+    expect(security.map((finding) => finding.title)).toEqual(['Modify All Records permission added'])
+    expect(security[0].evidence).toEqual([
+      'Account.ModifyAllRecords false → true',
+      'Account.Delete false → true',
+      'Account.ViewAllRecords false → true',
+    ])
   })
 })

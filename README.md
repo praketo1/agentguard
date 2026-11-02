@@ -68,6 +68,10 @@ VERDICT
 
 After the developer removes Modify All and adds a test class, a re-run reports **40 / 100 MEDIUM**.
 
+### A release with no Agentforce
+
+`npm run demo:o2c` builds an Order-to-Cash story: "discount approval and region clean-up". It deletes a field that Apex and a Flow still use, removes a picklist value that is still compared in code, leaves out a field that the new code needs, removes `with sharing` from a service, and adds a validation rule plus a second automation on Opportunity. AgentGuard rates it **CRITICAL** with 14 findings. A real Salesforce validation fails with exactly the two problems AgentGuard ranks first, and deploys the other risks without complaint. After the fix AgentGuard reports **LOW (20/100)**, and the Salesforce validation passes.
+
 ---
 
 ## Commands
@@ -121,15 +125,22 @@ Console report · JSON · optional Copado AI explanation (host.ai.ask)
 | | View All Records on an object | +10 |
 | | Delete on an object | +8 |
 | | Sensitive system permission (ManageUsers, AuthorApex, …) | +8 |
+| | Sharing removed from an Apex class (`with sharing` → without/none) | +12 |
+| | New user-callable class (`@AuraEnabled`, `@InvocableMethod`, REST) runs `without sharing` | +8 |
 | | Apex class access granted | +5 |
 | | New object CRUD / editable fields | +4 each / +2 each |
 | **Dependency** (30) | Deleted component still referenced | +15 (critical) |
-| | Missing dependency (referenced, not in repo or story) | +15 |
+| | Missing dependency: a custom field/object, Apex, Flow or prompt that changed code uses but is not in the repo or story | +15 |
+| | Breaking field change (type change, length/precision reduced) | +12 |
+| | Picklist value removed while code or flows still use it (unused: +6) | +12 |
 | | High blast radius (≥ 5 unchanged components impacted) | +10 |
+| | New validation rule or required field on an object that Apex/Flows write | +8 |
 | | Shared component changed (≥ 3 direct consumers) | +7 |
+| | New record-triggered flow on an object that already has a trigger or flow | +6 |
 | **Test** (20) | Changed Apex with no related `@IsTest` class | +15 |
 | | Test class deleted | +10 |
 | | Test assertions removed | +6 |
+| | Test switched to `SeeAllData=true` | +5 |
 | | Test class modified / related tests not updated / Flow without Flow test | +4 / +3 / +3 |
 | **Agentforce** (20) | Multiple agents in the blast radius | +15 |
 | | One agent in the blast radius | +10 |
@@ -138,11 +149,24 @@ Console report · JSON · optional Copado AI explanation (host.ai.ask)
 | | Agent Action implementation (invocation target) changed | +8 |
 | | Prompt template changed / agent, topic or action definition changed | +6 / +5 |
 
-Levels: **LOW** ≤ 30 < **MEDIUM** ≤ 60 < **HIGH** ≤ 80 < **CRITICAL**. Any critical finding blocks promotion whatever the total.
+Levels: **LOW** ≤ 30 < **MEDIUM** ≤ 60 < **HIGH** ≤ 80 < **CRITICAL**. Any critical finding (such as a deleted component that is still used) makes the level CRITICAL and blocks promotion, whatever the total.
+
+The reference graph covers Apex, triggers, Flows, LWC/Aura, custom fields and objects, validation rules, custom permissions, and Agentforce metadata. A custom field is traced by its API name (`Region__c`) everywhere it is used.
 
 ### Configuration
 
 Drop an `agentguard.yml` in the repository root to tune weights, thresholds and depth for your organisation. See [agentguard.example.yml](agentguard.example.yml).
+
+### Agentia quality gate
+
+Agentia runs `.agentia_quality_gates.sh` from the repository root during `agentia cicd work test` and `agentia cicd work submit`. Add AgentGuard there, and a risky story cannot be submitted until it is fixed or explicitly accepted:
+
+```sh
+echo "## Running AgentGuard change risk analysis"
+agentia guard analyze --fail-on "${AGENTGUARD_FAIL_ON:-high}"
+```
+
+Inside the gate, AgentGuard reads the story set by `agentia cicd work set` (story number, base branch, next environment), so it needs no flags.
 
 ### Coding-agent skill
 
@@ -167,6 +191,13 @@ agentia plugins link .
 npm run demo -- ../agentguard-demo
 cd ../agentguard-demo
 agentia guard analyze --base main --target UAT
+```
+
+To recreate both demo repositories from the video (the Agentforce story and the Order-to-Cash story) in `~/agentguard-video`:
+
+```sh
+node demo/video-setup.mjs
+cd ~/agentguard-video/order-to-cash && agentia guard analyze
 ```
 
 Without an active Copado story, AgentGuard compares against `--base` (or `main`/`master`). With one selected in Agentia, it picks up the story number, base branch and target environment automatically.

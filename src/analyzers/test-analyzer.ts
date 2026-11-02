@@ -6,6 +6,7 @@ import {componentKey} from '../core/models.js'
 import type {AnalysisContext, Analyzer, DraftFinding} from './analyzer.js'
 
 const ASSERTION = /\b(System\.assert\w*|Assert\.\w+)\s*\(/gi
+const SEE_ALL_DATA = /SeeAllData\s*=\s*true/i
 
 /** Rule 3 — related Apex/Flow tests for changed code, and weakened or deleted tests. */
 export class TestAnalyzer implements Analyzer {
@@ -81,9 +82,24 @@ export class TestAnalyzer implements Analyzer {
         continue
       }
 
+      const previousSource = change.status === 'added' ? undefined : await git.show(mergeBase, change.path!)
+      const source = readFile(git.cwd, change.path!)
+      if (SEE_ALL_DATA.test(source ?? '') && !SEE_ALL_DATA.test(previousSource ?? '')) {
+        findings.push({
+          category: 'test',
+          severity: 'medium',
+          score: weights.seeAllData,
+          title: 'Test uses SeeAllData=true',
+          description: `${change.name} now reads the org's real data, so it can pass in one environment and fail in the next.`,
+          component: change,
+          evidence: [`${change.path}: @IsTest(SeeAllData=true)`],
+          recommendation: `Create the test data inside ${change.name} (or a @TestSetup method) instead of relying on org data.`,
+        })
+      }
+
       if (change.status === 'added') continue
-      const before = countAssertions(await git.show(mergeBase, change.path!))
-      const after = countAssertions(readFile(git.cwd, change.path!))
+      const before = countAssertions(previousSource)
+      const after = countAssertions(source)
       const weakened = after < before
       findings.push({
         category: 'test',

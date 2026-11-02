@@ -1,6 +1,7 @@
 import type {Analyzer, DraftFinding} from '../analyzers/analyzer.js'
 import {AgentforceAnalyzer} from '../analyzers/agentforce-analyzer.js'
 import {DependencyAnalyzer} from '../analyzers/dependency-analyzer.js'
+import {SchemaAnalyzer} from '../analyzers/schema-analyzer.js'
 import {SecurityAnalyzer} from '../analyzers/security-analyzer.js'
 import {TestAnalyzer} from '../analyzers/test-analyzer.js'
 import {GitReader} from '../git/git.js'
@@ -19,7 +20,13 @@ export interface AnalyzeOptions {
   maxDepth?: number
 }
 
-export const ANALYZERS: Analyzer[] = [new SecurityAnalyzer(), new DependencyAnalyzer(), new TestAnalyzer(), new AgentforceAnalyzer()]
+export const ANALYZERS: Analyzer[] = [
+  new SecurityAnalyzer(),
+  new DependencyAnalyzer(),
+  new SchemaAnalyzer(),
+  new TestAnalyzer(),
+  new AgentforceAnalyzer(),
+]
 
 const ID_PREFIXES: Record<RiskCategory, string> = {agentforce: 'AF', dependency: 'DEP', security: 'SEC', test: 'TEST'}
 

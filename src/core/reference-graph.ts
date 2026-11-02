@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import {asArray, parseMetadata, tagValues} from '../salesforce/xml.js'
-import {REFERENCEABLE_TYPES, classify, isApexTestSource} from './metadata-classifier.js'
+import {classify, isApexTestSource, referenceName} from './metadata-classifier.js'
 import {type ComponentRef, type ImpactedComponent, componentKey} from './models.js'
 
 export interface RepoComponent {
@@ -112,10 +112,18 @@ export class ReferenceGraph {
     else this.components.set(key, {ref: {...ref, path: file}, files: [file], isTest: false, phantom: false})
   }
 
+  /** Concatenated source of a component's files in the working tree. */
+  source(component: RepoComponent, repoRoot: string): string {
+    return component.files
+      .filter((file) => fs.existsSync(path.join(repoRoot, file)))
+      .map((file) => fs.readFileSync(path.join(repoRoot, file), 'utf8'))
+      .join('\n')
+  }
+
   private indexNames(): void {
     for (const [key, component] of this.components) {
-      if (!REFERENCEABLE_TYPES.has(component.ref.type) || component.ref.name.length < MIN_NAME_LENGTH) continue
-      const name = component.ref.name.toLowerCase()
+      const name = referenceName(component.ref)?.toLowerCase()
+      if (!name || name.length < MIN_NAME_LENGTH) continue
       this.nameIndex.set(name, [...(this.nameIndex.get(name) ?? []), key])
     }
   }

@@ -58,9 +58,10 @@ describe('risk engine', () => {
     expect(risk.promotable).toBe(true)
   })
 
-  it('blocks promotion on any critical finding even when the score is low', () => {
+  it('escalates to CRITICAL and blocks promotion on any critical finding, whatever the score', () => {
     const risk = assessRisk([finding('dependency', 15, 'critical')], DEFAULT_CONFIG)
-    expect(risk.level).toBe('LOW')
+    expect(risk.score).toBe(15)
+    expect(risk.level).toBe('CRITICAL')
     expect(risk.promotable).toBe(false)
   })
 

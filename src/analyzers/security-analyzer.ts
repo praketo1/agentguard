@@ -25,6 +25,12 @@ export class SecurityAnalyzer implements Analyzer {
   async analyze(context: AnalysisContext): Promise<DraftFinding[]> {
     const findings: DraftFinding[] = []
     for (const change of context.changes) {
+      if (change.type === 'ApexClass' && !change.isTest && change.status !== 'deleted') {
+        const before = change.status === 'added' ? undefined : await context.git.show(context.mergeBase, change.path!)
+        findings.push(...sharingChanges(change, before, readFile(context.git.cwd, change.path!) ?? '', context))
+        continue
+      }
+
       if (change.type !== 'PermissionSet' && change.type !== 'Profile') continue
       if (change.status === 'deleted') continue
       const before = parseMetadata(await context.git.show(context.mergeBase, change.path!))
@@ -76,13 +82,18 @@ export function diffPermissions(
   for (const [object, entry] of keyed(after.objectPermissions, 'object')) {
     const previous = objectsBefore.get(object)
     const granted = OBJECT_FLAGS.filter((flag) => isTrue(entry[flag]) && !isTrue(previous?.[flag]))
+    const describe = (flag: string) => `${object}.${FLAG_LABELS[flag]} ${previous ? 'false' : 'absent'} → true`
+    // Salesforce requires View All and Delete alongside Modify All: one decision, scored once.
+    const modifyAll = granted.includes('modifyAllRecords')
     for (const flag of granted) {
-      const evidence = [`${object}.${FLAG_LABELS[flag]} ${previous ? 'false' : 'absent'} → true`]
+      const evidence = [describe(flag)]
       if (flag === 'modifyAllRecords') {
         finding('high', weights.modifyAllRecords, 'Modify All Records permission added',
-          `Users with ${change.name} can edit and delete every ${object} record regardless of sharing.`,
-          evidence,
+          `Users with ${change.name} can view, edit and delete every ${object} record regardless of sharing.`,
+          [...evidence, ...granted.filter((other) => other === 'viewAllRecords' || other === 'allowDelete').map(describe)],
           `Confirm Modify All on ${object} is intentionally required; prefer Read/Edit with sharing rules.`)
+      } else if (modifyAll && (flag === 'viewAllRecords' || flag === 'allowDelete')) {
+        continue
       } else if (flag === 'viewAllRecords') {
         finding('medium', weights.viewAllRecords, 'View All Records permission added',
           `Users with ${change.name} can read every ${object} record regardless of sharing.`,
@@ -129,6 +140,54 @@ export function diffPermissions(
   }
 
   return findings
+}
+
+const ENTRY_POINT = /@AuraEnabled|@InvocableMethod|@RestResource|\bwebservice\s/i
+
+/** Sharing keyword of the outer class: `with`, `without`, `inherited`, or `none` (runs in the caller's mode). */
+export function sharingMode(source: string): string {
+  const declaration = /\b(?:(with|without|inherited)\s+sharing\s+)?class\s+\w+/i.exec(source.replaceAll(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, ''))
+  return declaration?.[1]?.toLowerCase() ?? 'none'
+}
+
+export function sharingChanges(
+  change: ChangedComponent,
+  before: string | undefined,
+  after: string,
+  {config}: Pick<AnalysisContext, 'config'>,
+): DraftFinding[] {
+  const weights = config.rules.security
+  const component: ComponentRef = {type: change.type, name: change.name, path: change.path}
+  const was = before === undefined ? undefined : sharingMode(before)
+  const now = sharingMode(after)
+
+  if (was === 'with' && now !== 'with') {
+    return [{
+      category: 'security',
+      severity: 'high',
+      score: weights.sharingRemoved,
+      title: 'Sharing enforcement removed',
+      description: `${change.name} no longer declares "with sharing", so its queries and DML can reach records the running user cannot see.`,
+      component,
+      evidence: [`${change.name}: with sharing → ${now === 'none' ? 'no sharing keyword' : `${now} sharing`}`],
+      recommendation: `Keep "with sharing" on ${change.name}; if one operation must bypass sharing, isolate it in a small inner "without sharing" class.`,
+    }]
+  }
+
+  if (now === 'without' && was !== 'without' && ENTRY_POINT.test(after)) {
+    return [{
+      category: 'security',
+      severity: 'medium',
+      score: weights.withoutSharingEntryPoint,
+      title: 'User-callable class runs without sharing',
+      description: `${change.name} is callable from LWC, Flow or the API and runs "without sharing", so any user who can call it bypasses record-level security.`,
+      component,
+      evidence: [`${change.name}: ${was ?? 'new class'} → without sharing`, ...(after.match(ENTRY_POINT) ?? []).map((match) => `Entry point: ${match.trim()}`)],
+      recommendation: `Use "with sharing" (or "inherited sharing") on ${change.name} unless bypassing sharing is an explicit requirement.`,
+    }]
+  }
+
+  return []
 }
 
 function keyed(value: unknown, keyField: string): Map<string, Entry> {

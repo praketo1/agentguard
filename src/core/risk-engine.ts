@@ -10,8 +10,9 @@ export function assessRisk(findings: Finding[], config: AgentGuardConfig): RiskA
   }
 
   const score = Math.min(100, Object.values(categories).reduce((sum, category) => sum + category.score, 0))
-  const level = riskLevel(score, config)
   const hasCritical = findings.some((finding) => finding.severity === 'critical')
+  // A critical finding (e.g. a deleted component still in use) breaks the release whatever the total.
+  const level = hasCritical ? 'CRITICAL' : riskLevel(score, config)
   const highCount = findings.filter((finding) => finding.severity === 'high' || finding.severity === 'critical').length
 
   let verdict: string

@@ -1,11 +1,17 @@
+import {customSchemaTokens} from '../core/metadata-classifier.js'
 import {type ImpactedComponent, componentKey} from '../core/models.js'
 import type {AnalysisContext, Analyzer, DraftFinding} from './analyzer.js'
+
+/** Component types whose source refers to fields and objects by API name. */
+const SCHEMA_CONSUMERS = new Set([
+  'ApexClass', 'ApexTrigger', 'AuraDefinitionBundle', 'CustomField', 'Flow', 'LightningComponentBundle', 'ValidationRule',
+])
 
 /** Rule 2 — blast radius, shared services, and references that will not resolve after deployment. */
 export class DependencyAnalyzer implements Analyzer {
   name = 'dependency'
 
-  async analyze({blastRadius, changes, config, graph}: AnalysisContext): Promise<DraftFinding[]> {
+  async analyze({blastRadius, changes, config, git, graph}: AnalysisContext): Promise<DraftFinding[]> {
     const weights = config.rules.dependency
     const findings: DraftFinding[] = []
 
@@ -41,6 +47,32 @@ export class DependencyAnalyzer implements Analyzer {
         component: missing.from,
         evidence: [`${missing.from.name} (${missing.via}) → ${missing.name}: not found`],
         recommendation: `Add ${missing.expectedType} ${missing.name} to the user story, or confirm it already exists in the target environment.`,
+      })
+    }
+
+    // Custom fields/objects used by changed code but absent from the repository: the classic
+    // "Variable does not exist" / "Invalid field" deployment failure when a field is left out of the story.
+    const missingSchema = new Map<string, string[]>()
+    for (const change of changes) {
+      if (change.status === 'deleted' || !SCHEMA_CONSUMERS.has(change.type)) continue
+      const component = graph.get(change)
+      if (!component) continue
+      const own = change.name.split('.').at(-1)
+      for (const token of customSchemaTokens(graph.source(component, git.cwd))) {
+        if (token === own || graph.findByName(token, ['CustomField', 'CustomObject']).length > 0) continue
+        missingSchema.set(token, [...(missingSchema.get(token) ?? []), `${change.type} ${change.name}`])
+      }
+    }
+
+    for (const [token, users] of missingSchema) {
+      findings.push({
+        category: 'dependency',
+        severity: 'high',
+        score: weights.missingDependency,
+        title: `Missing dependency: ${token}`,
+        description: `${users.length} changed component(s) use ${token}, but no field or object with that name is in the repository or this change. The deployment fails unless it already exists in the target org.`,
+        evidence: users.map((user) => `${user} → ${token}: not found`),
+        recommendation: `Add ${token} to the user story, or confirm it already exists in every environment of the pipeline.`,
       })
     }
 

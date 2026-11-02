@@ -60,6 +60,24 @@ export const REFERENCEABLE_TYPES = new Set([
   'LightningComponentBundle',
 ])
 
+const CUSTOM_SUFFIX = /__(c|mdt|e|b|x)$/
+
+/**
+ * The identifier code uses to refer to a component, or undefined when it cannot be found by token search.
+ * Fields are referenced by their API name (`Region__c`); standard objects (`Opportunity`) are too common to trace.
+ */
+export function referenceName(ref: ComponentRef): string | undefined {
+  if (ref.type === 'CustomField') return ref.name.split('.')[1]
+  if (ref.type === 'CustomObject') return CUSTOM_SUFFIX.test(ref.name) ? ref.name : undefined
+  return REFERENCEABLE_TYPES.has(ref.type) ? ref.name : undefined
+}
+
+/** Custom schema identifiers (`Discount_Approved__c`, `Invoice__c`) used in source, excluding managed-package names. */
+export function customSchemaTokens(source: string): string[] {
+  const tokens = source.match(/\b[A-Za-z][A-Za-z0-9_]*__(c|mdt|e)\b/g) ?? []
+  return [...new Set(tokens)].filter((token) => token.split('__').length === 2)
+}
+
 export function agentforceRole(type: string): AgentforceRole | undefined {
   return AGENTFORCE_ROLES[type]
 }
