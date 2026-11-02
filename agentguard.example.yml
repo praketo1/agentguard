@@ -1,0 +1,37 @@
+# Copy to agentguard.yml in the root of your Salesforce repository.
+# Any value you omit keeps its default; run `agentia guard rules` to see what is in effect.
+agentguard:
+  thresholds:
+    low: 30
+    medium: 60
+    high: 80
+
+  weights:
+    dependency: 30
+    security: 30
+    test: 20
+    agentforce: 20
+
+  rules:
+    security:
+      modifyAllData: 25
+      modifyAllRecords: 15
+      viewAllRecords: 10
+      deletePermission: 8
+      sensitiveUserPermissions: [AuthorApex, CustomizeApplication, ManageUsers, ViewSetup]
+
+    dependency:
+      missingDependency: 15
+      highBlastRadius: 10
+      highBlastRadiusThreshold: 5
+
+    test:
+      noRelatedTest: 15
+
+    agentforce:
+      multipleAgents: 15
+      promptDependencyMissing: 10
+
+  blastRadius:
+    maxDepth: 5
+    ignoreReferrerTypes: [PermissionSet, Profile, PermissionSetGroup]

@@ -1,0 +1,84 @@
+{
+  "name": "agentguard",
+  "description": "Salesforce change risk and blast radius analyzer for Agentia Headless",
+  "version": "0.1.0",
+  "author": "Prakash Arora",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": "./dist/index.js",
+  "license": "MIT",
+  "keywords": [
+    "oclif-plugin",
+    "agentia",
+    "salesforce",
+    "copado",
+    "agentforce",
+    "release-risk",
+    "blast-radius"
+  ],
+  "files": [
+    "/dist",
+    "/oclif.manifest.json",
+    "/skills"
+  ],
+  "dependencies": {
+    "@copado/agentia-plugin-sdk": "^0.1.1",
+    "fast-xml-parser": "^5.11.2",
+    "yaml": "^2.9.1"
+  },
+  "peerDependencies": {
+    "@oclif/core": "^4"
+  },
+  "devDependencies": {
+    "@oclif/core": "^4",
+    "@types/node": "^22",
+    "oclif": "^4",
+    "shx": "^0.3.3",
+    "typescript": "^5",
+    "vitest": "^3.2.7"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "agentia": {
+    "hostApi": 1,
+    "requires": [
+      "ai.ask",
+      "auth.status",
+      "format.table",
+      "pipeline.get",
+      "work.getWorkItem",
+      "workspace.current"
+    ],
+    "permissions": {
+      "network": [],
+      "files": "read",
+      "commands": [
+        "git"
+      ],
+      "env": []
+    }
+  },
+  "oclif": {
+    "bin": "agentia",
+    "dirname": "agentia-cli",
+    "commands": "./dist/commands",
+    "topics": {
+      "guard": {
+        "description": "Assess Salesforce change risk and blast radius before promotion"
+      }
+    },
+    "hooks": {
+      "agentia:contribute": "./dist/hooks/contribute"
+    }
+  },
+  "scripts": {
+    "build": "shx rm -rf dist && tsc -b",
+    "clean": "shx rm -f oclif.manifest.json",
+    "prepack": "npm run build && oclif manifest",
+    "postpack": "npm run clean",
+    "test": "vitest run",
+    "demo": "node demo/create-demo-repo.mjs"
+  }
+}
